@@ -1011,6 +1011,50 @@ func sendResultsByEmail() error {
 
 }
 
+// returnCSVByEmail put results into a CSV, zip it, and send it by email
+func returnCSVByEmail(compAndContRows []CompAndContRow, w http.ResponseWriter) {
+
+	// Put results in a CSV file
+	err := createCSV(compAndContRows)
+	if err != nil {
+		err = CustErr(err, "Could not create CSV.\nStopping here.")
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	// Compress the CSV file to .zip
+	err = compressCSV()
+	if err != nil {
+		err = CustErr(err, "Could not compress CSV.\nStopping here.")
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	// Send .zip archive by email
+	err = sendResultsByEmail()
+	if err != nil {
+		err = CustErr(err, "Could not send results by email.\nStopping here.")
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	// Remove CSV
+	err = os.Remove(returnedCSVName)
+	if err != nil {
+		err = CustErr(err, "Could not delete CSV.\nNOT stopping here.")
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+	// Remove .zip archive
+	err = os.Remove(returnedArchiveName)
+	if err != nil {
+		err = CustErr(err, "Could not remove archive.\nNOT stopping here.")
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
+
+}
+
 // ReturnCompaniesAndContacts loads companies and associated contacts from db
 // based on user criteria and renders results in JSON response to frontend
 func ReturnCompaniesAndContacts(w http.ResponseWriter, r *http.Request) {
@@ -1115,44 +1159,8 @@ func ReturnCompaniesAndContacts(w http.ResponseWriter, r *http.Request) {
 
 		if rowsNb > 5000 { // Send results in a compressed csv by email because too big
 
-			// Put results in a CSV file
-			err = createCSV(compAndContRows)
-			if err != nil {
-				err = CustErr(err, "Could not create CSV.\nStopping here.")
-				log.Println(err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-			// Compress the CSV file to .zip
-			err = compressCSV()
-			if err != nil {
-				err = CustErr(err, "Could not compress CSV.\nStopping here.")
-				log.Println(err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-			// Send .zip archive by email
-			err = sendResultsByEmail()
-			if err != nil {
-				err = CustErr(err, "Could not send results by email.\nStopping here.")
-				log.Println(err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-			// Remove CSV
-			err = os.Remove(returnedCSVName)
-			if err != nil {
-				err = CustErr(err, "Could not delete CSV.\nNOT stopping here.")
-				log.Println(err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-			}
-			// Remove .zip archive
-			err = os.Remove(returnedArchiveName)
-			if err != nil {
-				err = CustErr(err, "Could not remove archive.\nNOT stopping here.")
-				log.Println(err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-			}
+			// Send results by email asynchronously
+			go returnCSVByEmail(compAndContRows, w)
 
 			// Tell frontend that not returning a json but sent by email.
 			http.Error(w, "The request returned too many lines so results have been sent by email.", http.StatusNoContent)
